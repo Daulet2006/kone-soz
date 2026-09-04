@@ -1,71 +1,94 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
-import { AnimatePresence } from "framer-motion";
-import type { Phrase, VoiceState } from "@/types/phrase";
-import { findPhrase } from "@/lib/phrases/search";
-import { SpeechRecognitionService } from "@/lib/speech/recognition";
-import {
-  speakKazakh,
-  stopKazakh,
-  KazakhVoiceId,
-  getSavedVoice,
-} from "@/lib/speech/synthesis";
+import React, { useEffect, useRef, useState } from "react";
+import { AnimatePresence, motion } from "framer-motion";
+import { VoiceSelector } from "@/components/voice/VoiceSelector";
 import { SpeakingAvatar } from "@/components/voice/SpeakingAvatar";
 import { VoiceButton } from "@/components/voice/VoiceButton";
-import { VoiceSelector } from "@/components/voice/VoiceSelector";
 import { PhraseResult } from "@/components/result/PhraseResult";
 import { History } from "@/components/history/History";
+import { SpeechRecognitionService } from "@/lib/speech/recognition";
+import {
+  KazakhVoiceId,
+  getSavedVoice,
+  speakKazakh,
+  stopKazakh,
+} from "@/lib/speech/synthesis";
+import { findPhrase, combinedList } from "@/lib/phrases/search";
+import type { Phrase, VoiceState } from "@/types/phrase";
+import { Search, Dices, X, AlertCircle } from "lucide-react";
 
-const SAMPLE_PHRASES = [
-  "қорамсақ",
-  "селебе",
-  "ақберен",
-  "жасауыл",
-  "күпшек",
-  "көзді ашып жұмғанша",
-  "қой үстіне бозторғай жұмыртқалау",
-];
+const HISTORY_STORAGE_KEY = "taza-qazaqsha-history-v3";
 
 export default function Home() {
   const [state, setState] = useState<VoiceState>("idle");
+  const [level, setLevel] = useState(0);
   const [transcript, setTranscript] = useState("");
   const [inputText, setInputText] = useState("");
-  const [result, setResult] = useState<Phrase | null>(null);
   const [error, setError] = useState("");
+  const [result, setResult] = useState<Phrase | null>(null);
   const [history, setHistory] = useState<Phrase[]>([]);
-  const [level, setLevel] = useState(0);
   const [currentVoice, setCurrentVoice] = useState<KazakhVoiceId>("kk-KZ-AigulNeural");
+  const [samplePhrases, setSamplePhrases] = useState<Phrase[]>([]);
 
   const recognition = useRef<SpeechRecognitionService | null>(null);
   const stream = useRef<MediaStream | null>(null);
 
+  // Initialize client-side state
   useEffect(() => {
     recognition.current = new SpeechRecognitionService();
-    setCurrentVoice(getSavedVoice());
+    const savedVoice = getSavedVoice();
+    setCurrentVoice(savedVoice);
 
     try {
-      setHistory(JSON.parse(localStorage.getItem("taza-history") || "[]"));
+      const stored = localStorage.getItem(HISTORY_STORAGE_KEY);
+      if (stored) {
+        setHistory(JSON.parse(stored));
+      }
     } catch {}
 
-    return () => {
-      stopKazakh();
-      stream.current?.getTracks().forEach((t) => t.stop());
-    };
+    // Automatically display a rich curated blend of both slang and ancient words
+    const topKeywords = [
+      "имба",
+      "қой аузынан шөп алмас",
+      "краш",
+      "төбе шашы тік тұрды",
+      "пон",
+      "ит өлген жер",
+      "вайб",
+      "көзді ашып жұмғанша",
+      "рофл",
+      "базар жоқ",
+    ];
+
+    const curated = topKeywords
+      .map((k) => findPhrase(k))
+      .filter((p): p is Phrase => Boolean(p));
+
+    setSamplePhrases(curated);
   }, []);
 
-  const save = (p: Phrase) =>
-    setHistory((old) => {
-      const n = [p, ...old.filter((x) => x.id !== p.id)].slice(0, 4);
-      localStorage.setItem("taza-history", JSON.stringify(n));
-      return n;
+  const addToHistory = (phrase: Phrase) => {
+    setHistory((prev) => {
+      const filtered = prev.filter((p) => p.id !== phrase.id);
+      const updated = [phrase, ...filtered].slice(0, 10);
+      try {
+        localStorage.setItem(HISTORY_STORAGE_KEY, JSON.stringify(updated));
+      } catch {}
+      return updated;
     });
+  };
 
   const present = (p: Phrase) => {
     setResult(p);
-    save(p);
+    addToHistory(p);
     setState("speaking");
-    speakKazakh(`${p.phrase}. ${p.meaning}. ${p.explanation}`, {
+
+    // Natural text-to-speech script for the 3D character
+    const memeText = p.meme ? `Күлкілі мем: ${p.meme.replace(/^😂\s*Мем:\s*/i, "")}.` : "";
+    const speechScript = `${p.phrase}. ${p.meaning}. ${p.explanation}. ${memeText}`;
+
+    speakKazakh(speechScript, {
       voice: currentVoice,
       onFrequencyData: (lvl) => setLevel(lvl),
       onEnd: () => {
@@ -83,41 +106,53 @@ export default function Home() {
   const processText = async (text: string) => {
     stopKazakh();
     setError("");
-    setState("processing");
-    const found = findPhrase(text);
-    if (found) return present(found);
+    const cleanText = text.trim();
+    if (!cleanText) return;
 
+    // Always query OpenRouter to dynamically generate Meaning, Explanation, Example, Meme, and Fun Fact
+    setState("processing");
     try {
-      const r = await fetch("/api/explain", {
+      const res = await fetch("/api/explain", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text }),
+        body: JSON.stringify({ text: cleanText }),
       });
-      const d = await r.json();
-      if (!r.ok) throw new Error(d.error || "Бір нәрсе дұрыс болмады.");
-      present(d);
+
+      const data = await res.json();
+      if (!res.ok && !data.phrase) {
+        throw new Error(data.error || "Сөзді түсіндіру кезінде қате болды.");
+      }
+
+      present(data);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Бір нәрсе дұрыс болмады.");
-      setState("error");
+      // Local safety fallback if network fails
+      const local = findPhrase(cleanText);
+      if (local) {
+        present(local);
+      } else {
+        setError(e instanceof Error ? e.message : "Бір нәрсе дұрыс болмады.");
+        setState("error");
+      }
     }
   };
 
-  const start = async () => {
+
+  const startListening = async () => {
     stopKazakh();
     setError("");
     setResult(null);
     setTranscript("");
 
     if (!recognition.current?.supported()) {
-      setError("Бұл браузерде дауыс тану қолдау таппайды. Мәтін енгізу өрісін қолдана аласыз.");
+      setError("Бұл браузерде дауыс тану қолдау таппайды. Мәтін өрісіне жазыңыз.");
       return setState("error");
     }
 
     try {
       stream.current = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const audio = new AudioContext();
-      const analyser = audio.createAnalyser();
-      const source = audio.createMediaStreamSource(stream.current);
+      const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
+      const analyser = audioCtx.createAnalyser();
+      const source = audioCtx.createMediaStreamSource(stream.current);
       const data = new Uint8Array(analyser.frequencyBinCount);
       source.connect(analyser);
 
@@ -126,13 +161,16 @@ export default function Home() {
       const tick = () => {
         if (state !== "listening" && stream.current?.active === false) return;
         analyser.getByteFrequencyData(data);
-        setLevel(data.reduce((a, b) => a + b, 0) / data.length / 255);
+        const avg = data.reduce((a, b) => a + b, 0) / data.length / 255;
+        setLevel(avg);
         requestAnimationFrame(tick);
       };
       tick();
 
       recognition.current.start(
-        ({ transcript: text }) => setTranscript(text),
+        ({ transcript: text }) => {
+          setTranscript(text);
+        },
         (msg) => {
           stream.current?.getTracks().forEach((t) => t.stop());
           setError(msg);
@@ -145,31 +183,20 @@ export default function Home() {
     }
   };
 
-  const toggle = () => {
+  const toggleListening = () => {
     if (state === "listening") {
       recognition.current?.stop();
       stream.current?.getTracks().forEach((t) => t.stop());
-      if (transcript) {
+      if (transcript.trim()) {
         processText(transcript);
       } else {
-        setError("Дауыс танылмады. Қайтадан көріңіз немесе сөзді жазыңыз.");
-        setState("error");
+        setError("Дауыс танылмады. Қайтадан көріңіз немесе жазыңыз.");
+        setState("idle");
       }
     } else {
-      start();
+      startListening();
     }
   };
-
-  const label =
-    state === "listening"
-      ? "Тыңдап тұрмын..."
-      : state === "processing"
-      ? "Көне сөздің мағынасын талдап жатырмын..."
-      : state === "speaking"
-      ? "Табиғи қазақша түсіндіріп берейін..."
-      : state === "error"
-      ? "Қайтадан көріңіз"
-      : "Кез келген көне қазақ сөзін айтыңыз немесе жазыңыз";
 
   const stopSpeech = () => {
     stopKazakh();
@@ -187,25 +214,18 @@ export default function Home() {
     setState("idle");
   };
 
+  const handleRandomPhrase = () => {
+    if (!combinedList.length) return;
+    const randomItem = combinedList[Math.floor(Math.random() * combinedList.length)];
+    processText(randomItem.phrase);
+  };
+
   const handleReplay = () => {
     if (!result) return;
     if (state === "speaking") {
       stopSpeech();
     } else {
-      setState("speaking");
-      speakKazakh(`${result.phrase}. ${result.meaning}. ${result.explanation}`, {
-        voice: currentVoice,
-        onFrequencyData: (lvl) => setLevel(lvl),
-        onEnd: () => {
-          setState("complete");
-          setLevel(0);
-        },
-        onError: (msg) => {
-          setError(msg);
-          setState("complete");
-          setLevel(0);
-        },
-      });
+      present(result);
     }
   };
 
@@ -216,112 +236,202 @@ export default function Home() {
     }
   };
 
+  const isFemale = currentVoice === "kk-KZ-AigulNeural";
+
+  const statusLabel =
+    state === "listening"
+      ? "Сізді мұқият тыңдап тұрмын..."
+      : state === "processing"
+      ? "Сөздің мағынасы мен мемін ойластырудамын..."
+      : state === "speaking"
+      ? `${isFemale ? "Арай.AI" : "Айбар.AI"} түсіндіріп жатыр...`
+      : state === "error"
+      ? "Қайта көріңіз"
+      : "Кез келген сөзді немесе сленгті айтыңыз / жазыңыз:";
+
   return (
-    <main>
-      <header>
-        <span className="mark">◒</span>
-        <span className="brand-title">ТАЗА ҚАЗАҚША</span>
-        <div className="header-controls">
+    <main className={`app-root-shell ${isFemale ? "theme-female" : "theme-male"}`}>
+      {/* Background Decorative Lighting */}
+      <div className="ambient-glow glow-top-left" />
+      <div className="ambient-glow glow-bottom-right" />
+      <div className="cyber-pattern-grid" />
+
+      {/* Top Navigation Header */}
+      <header className="main-header">
+        <div className="brand-logo-group" onClick={newQuery} style={{ cursor: "pointer" }}>
+          <span className="brand-logo-icon">✨</span>
+          <div className="brand-title-wrap">
+            <h1 className="brand-title">ТАЗА ҚАЗАҚША</h1>
+            <span className="brand-badge">3D ИИ СӨЗДІК & МЕМДЕР</span>
+          </div>
+        </div>
+
+        {/* 3D Character Voice Selector */}
+        <div className="header-actions">
           <VoiceSelector
             currentVoice={currentVoice}
-            onVoiceChange={(v) => setCurrentVoice(v)}
+            onVoiceChange={(v) => {
+              setCurrentVoice(v);
+              if (result && state === "speaking") {
+                stopKazakh();
+                setTimeout(() => present(result), 150);
+              }
+            }}
             disabled={state === "listening"}
           />
         </div>
-        <small className="header-subtitle">КӨНЕ СӨЗДІҢ ТІРІ МАҒЫНАСЫ</small>
       </header>
 
-      <div className="ambient a" />
-      <div className="ambient b" />
+      {/* Center 3D Stage Section */}
+      <section className="stage-section">
+        {/* Status Caption */}
+        <p className="stage-status-text">{statusLabel}</p>
 
-      <section className="stage">
-        <p className="status">{label}</p>
+        {/* Photorealistic 3D Speaking Avatar */}
+        <SpeakingAvatar state={state} level={level} voice={currentVoice} />
 
-        <SpeakingAvatar state={state} level={level} />
-
+        {/* Audio Waveform while listening */}
         <AnimatePresence>
           {state === "listening" && (
-            <div className="waves">
-              {Array.from({ length: 23 }).map((_, i) => (
+            <motion.div
+              className="listening-waveform-strip"
+              initial={{ opacity: 0, scale: 0.8 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.8 }}
+            >
+              {Array.from({ length: 24 }).map((_, i) => (
                 <i
                   key={i}
+                  className="wave-bar"
                   style={{
-                    height: `${18 + ((i * 13) % 48) + level * 54}px`,
-                    animationDelay: `${i * 0.035}s`,
+                    height: `${14 + ((i * 9) % 36) + level * 52}px`,
+                    animationDelay: `${i * 0.04}s`,
                   }}
                 />
               ))}
-            </div>
+            </motion.div>
           )}
         </AnimatePresence>
 
-        <div className="action-row">
-          <VoiceButton listening={state === "listening"} onClick={toggle} />
-          {state === "speaking" && (
-            <button className="stop-speech" onClick={stopSpeech}>
-              ■ Тоқтату
-            </button>
-          )}
+        {/* Action Controls (Voice Button + Random Button) */}
+        <div className="controls-row">
+          <VoiceButton
+            listening={state === "listening"}
+            onClick={toggleListening}
+            disabled={state === "processing"}
+          />
+
+          <button
+            type="button"
+            className="random-phrase-btn"
+            onClick={handleRandomPhrase}
+            disabled={state === "listening" || state === "processing"}
+            title="Кездейсоқ сөз таңдау"
+          >
+            <Dices size={18} />
+            <span>Кездейсоқ сөз</span>
+          </button>
         </div>
 
-        {/* Text Input for Typing ANY Ancient Word */}
-        <form className="text-input-form" onSubmit={handleFormSubmit}>
-          <input
-            type="text"
-            className="text-input"
-            value={inputText}
-            onChange={(e) => setInputText(e.target.value)}
-            placeholder="Кез келген көне сөзді жазыңыз (мысалы: селебе, ақберен, қорамсақ)..."
-            disabled={state === "listening" || state === "processing"}
-          />
+        {/* Fast Text Input Form */}
+        <form className="search-input-form" onSubmit={handleFormSubmit}>
+          <div className="input-field-wrapper">
+            <Search size={18} className="search-input-icon" />
+            <input
+              type="text"
+              className="main-search-input"
+              value={inputText}
+              onChange={(e) => setInputText(e.target.value)}
+              placeholder="Кез келген сөзді немесе сленгті жазыңыз (мысалы: имба, краш, қой аузынан шөп алмас)..."
+              disabled={state === "listening" || state === "processing"}
+            />
+            {inputText && (
+              <button
+                type="button"
+                className="input-clear-btn"
+                onClick={() => setInputText("")}
+              >
+                <X size={16} />
+              </button>
+            )}
+          </div>
           <button
             type="submit"
-            className="text-submit-btn"
+            className="search-submit-btn"
             disabled={!inputText.trim() || state === "processing"}
           >
-            {state === "processing" ? "Іздеуде..." : "Түсіндір"}
+            {state === "processing" ? (
+              <span className="btn-spinner">Ойлануда...</span>
+            ) : (
+              <span>Түсіндір</span>
+            )}
           </button>
         </form>
 
-        <p className="hint">
+        {/* Live Transcript / Prompt */}
+        <p className="stage-hint-text">
           {state === "idle"
-            ? "Дауыспен айтыңыз немесе мына көне сөздердің бірін таңдаңыз:"
-            : transcript || "Даусыңызды тыңдап тұрмын..."}
+            ? "Ұсынылатын танымал сөздерді басыңыз немесе өз сөзіңізді жазыңыз:"
+            : transcript
+            ? `«${transcript}»`
+            : "Даусыңызды күтіп тұрмын..."}
         </p>
 
+        {/* Sample Trending Chips (Automatic blend of slang & ancient) */}
         {state === "idle" && !result && (
-          <div className="sample-chips">
-            {SAMPLE_PHRASES.map((phrase) => (
-              <button
-                key={phrase}
-                type="button"
-                className="chip-button"
-                onClick={() => processText(phrase)}
-              >
-                «{phrase}»
-              </button>
-            ))}
+          <div className="sample-chips-wrap">
+            {samplePhrases.map((item) => {
+              const isSlang = item.isSlang || item.category?.toLowerCase().includes("сленг");
+              return (
+                <button
+                  key={item.id}
+                  type="button"
+                  className={`sample-chip ${isSlang ? "chip-slang" : "chip-ancient"}`}
+                  onClick={() => processText(item.phrase)}
+                >
+                  <span className="chip-icon">{isSlang ? "⚡" : "🏛️"}</span>
+                  <span className="chip-text">«{item.phrase}»</span>
+                </button>
+              );
+            })}
           </div>
         )}
 
-        {error && <p className="error">{error}</p>}
+        {/* Error Notification */}
+        {error && (
+          <div className="error-alert-banner">
+            <AlertCircle size={16} />
+            <span>{error}</span>
+          </div>
+        )}
       </section>
 
-      <AnimatePresence>
+      {/* Result Card with AI Memes (Automatically Tagged) */}
+      <AnimatePresence mode="wait">
         {result && (
           <PhraseResult
             phrase={result}
             isSpeaking={state === "speaking"}
+            activeVoiceGender={isFemale ? "female" : "male"}
             onReplay={handleReplay}
             onNew={newQuery}
           />
         )}
       </AnimatePresence>
 
-      <History items={history} onChoose={present} />
+      {/* History of Searched Words */}
+      <History items={history} onChoose={(p) => processText(p.phrase)} />
 
-      <footer>
-        Қазақтың көне сөздері мен тарихи ұғымдары. Жасанды интеллект және HD табиғи дауыспен түсіндіру.
+      {/* Site Footer */}
+      <footer className="main-footer">
+        <div className="footer-content">
+          <p className="footer-title">
+            🇰🇿 ТАЗА ҚАЗАҚША — Көне сөздер, жастар сленгі және күлкілі мемдер
+          </p>
+          <p className="footer-sub">
+            3D ИИ кейіпкерлер Арай мен Айбар • Табиғи HD қазақша дауыс • Балалар мен жастар үшін
+          </p>
+        </div>
       </footer>
     </main>
   );

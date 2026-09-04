@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import React, { useEffect, useState } from "react";
 import { KAZAKH_VOICES, KazakhVoiceId, getSavedVoice, setSavedVoice } from "@/lib/speech/synthesis";
+import { Sparkles, User, UserCheck } from "lucide-react";
 
 interface VoiceSelectorProps {
   currentVoice?: KazakhVoiceId;
@@ -34,23 +35,35 @@ export function VoiceSelector({
   };
 
   return (
-    <div className="voice-selector-container">
-      <div className="voice-selector-label">Дыбыс:</div>
-      <div className="voice-selector-pill">
+    <div className="voice-selector-box">
+      <div className="voice-selector-tabs">
         {KAZAKH_VOICES.map((v) => {
           const isSelected = activeVoice === v.id;
+          const isFemale = v.gender === "female";
+
           return (
             <button
               key={v.id}
               type="button"
               disabled={disabled}
-              className={`voice-tab ${isSelected ? "is-active" : ""}`}
+              className={`voice-tab-btn ${isSelected ? "is-active" : ""} ${
+                isFemale ? "theme-female" : "theme-male"
+              }`}
               onClick={() => handleSelect(v.id)}
               title={v.description}
             >
-              <span className="voice-icon">{v.icon}</span>
-              <span className="voice-name">{v.name}</span>
-              {isSelected && <span className="voice-badge">HD</span>}
+              <span className="voice-avatar-icon">
+                {isFemale ? "👩" : "👨"}
+              </span>
+              <div className="voice-text-info">
+                <div className="voice-main-title">
+                  <span>{v.name}</span>
+                  {isSelected && <span className="voice-3d-badge">3D LIVE</span>}
+                </div>
+                <span className="voice-sub-desc">
+                  {isFemale ? "Қыз кейіпкері" : "Ұл кейіпкері"}
+                </span>
+              </div>
             </button>
           );
         })}

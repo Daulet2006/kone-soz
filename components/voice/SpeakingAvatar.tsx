@@ -1,60 +1,52 @@
 "use client";
-import { motion } from "framer-motion";
+
+import React from "react";
 import type { VoiceState } from "@/types/phrase";
+import type { KazakhVoiceId } from "@/lib/speech/synthesis";
+import { RealisticAvatar3D } from "@/components/avatar/RealisticAvatar3D";
+
+interface SpeakingAvatarProps {
+  state: VoiceState;
+  level?: number;
+  voice: KazakhVoiceId;
+}
 
 export function SpeakingAvatar({
   state,
   level = 0,
-}: {
-  state: VoiceState;
-  level?: number;
-}) {
-  const active = state === "listening" || state === "speaking";
-  const dynamicScale = 1 + Math.min(level * 0.4, 0.25);
+  voice,
+}: SpeakingAvatarProps) {
+  const isFemale = voice === "kk-KZ-AigulNeural";
 
   return (
-    <div className={`avatar-shell ${state}`}>
-      <motion.div
-        className="avatar"
-        animate={{
-          scale: dynamicScale,
-          rotate: state === "processing" ? [0, 6, -6, 0] : 0,
-          y: state === "speaking" ? [0, -3, 0] : 0,
-        }}
-        transition={{
-          scale: { type: "spring", stiffness: 260, damping: 18 },
-          rotate: { repeat: state === "processing" ? Infinity : 0, duration: 1.8 },
-          y: { repeat: state === "speaking" ? Infinity : 0, duration: 0.5 },
-        }}
-      >
-        <span className="eye left" />
-        <span className="eye right" />
-        <motion.span
-          className="mouth"
-          animate={{
-            scaleY:
-              state === "speaking"
-                ? [1, 2.2 + level * 2.5, 0.7, 1.8 + level * 2, 1]
-                : 1,
-            scaleX: state === "speaking" ? [1, 1.2, 0.9, 1.1, 1] : 1,
-            width: state === "speaking" ? 22 : 15,
-          }}
-          transition={{
-            repeat: state === "speaking" ? Infinity : 0,
-            duration: 0.36,
-            ease: "easeInOut",
-          }}
-        />
-      </motion.div>
-      {active && (
-        <div className="orbit">
-          <i />
-          <i />
-          <i />
-          <i />
-          <i />
+    <div className={`avatar-stage-shell ${state} ${isFemale ? "is-female" : "is-male"}`}>
+      {/* Photorealistic 3D Interactive AI Character */}
+      <RealisticAvatar3D voice={voice} state={state} level={level} />
+
+      {/* Floating Audio Spectrum Ring for Speaking/Listening */}
+      {(state === "speaking" || state === "listening") && (
+        <div className="audio-reactive-spectrum">
+          {Array.from({ length: 16 }).map((_, i) => (
+            <span
+              key={i}
+              className="spectrum-bar"
+              style={{
+                transform: `rotate(${i * 22.5}deg) translateY(-145px)`,
+                height: `${8 + level * 36 + Math.sin(i + level * 10) * 12}px`,
+                opacity: 0.3 + level * 0.7,
+              }}
+            />
+          ))}
         </div>
       )}
+
+      {/* Character Nameplate Tag */}
+      <div className="character-nameplate">
+        <span className="character-status-dot" />
+        <span className="character-name-label">
+          {isFemale ? "Арай.AI • 3D Қыз кейіпкері" : "Айбар.AI • 3D Ұл кейіпкері"}
+        </span>
+      </div>
     </div>
   );
 }
