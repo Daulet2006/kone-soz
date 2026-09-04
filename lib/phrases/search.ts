@@ -1,11 +1,29 @@
-import Fuse from "fuse.js";
 import phrases from "@/data/phrases.json";
 import type { Phrase } from "@/types/phrase";
 
 const list = phrases as Phrase[];
-const fuse = new Fuse(list, { keys: ["phrase", "aliases"], threshold: 0.42, ignoreLocation: true, minMatchCharLength: 3 });
-export function findPhrase(query: string) {
-  const clean = query.toLocaleLowerCase("kk-KZ").replace(/[?!,.]/g, " ").replace(/деген не|дегенім|мағынасы|айтшы/g, "").trim();
-  const direct = list.find(p => [p.phrase, ...p.aliases].some(x => clean.includes(x)));
-  return direct || fuse.search(clean)[0]?.item || null;
+
+function normalizeText(str: string): string {
+  return str
+    .toLocaleLowerCase("kk-KZ")
+    .replace(/[«»"'`.,!?;:]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+export function findPhrase(query: string): Phrase | null {
+  const clean = normalizeText(
+    query.replace(/деген не|дегенім|мағынасы қандай|мағынасы|айтшы|түсіндір/g, "")
+  );
+
+  if (!clean) return null;
+
+  // Strict exact match only: phrase matches completely or alias matches completely
+  const match = list.find((p) => {
+    const normPhrase = normalizeText(p.phrase);
+    if (normPhrase === clean) return true;
+    return p.aliases.some((a) => normalizeText(a) === clean);
+  });
+
+  return match || null;
 }

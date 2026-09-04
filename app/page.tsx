@@ -18,17 +18,19 @@ import { PhraseResult } from "@/components/result/PhraseResult";
 import { History } from "@/components/history/History";
 
 const SAMPLE_PHRASES = [
+  "қорамсақ",
+  "селебе",
+  "ақберен",
+  "жасауыл",
+  "күпшек",
   "көзді ашып жұмғанша",
-  "қой аузынан шөп алмас",
-  "қара қылды қақ жару",
-  "екі көзі төрт болды",
-  "жерден жеті қоян тапқандай",
   "қой үстіне бозторғай жұмыртқалау",
 ];
 
 export default function Home() {
   const [state, setState] = useState<VoiceState>("idle");
   const [transcript, setTranscript] = useState("");
+  const [inputText, setInputText] = useState("");
   const [result, setResult] = useState<Phrase | null>(null);
   const [error, setError] = useState("");
   const [history, setHistory] = useState<Phrase[]>([]);
@@ -79,6 +81,8 @@ export default function Home() {
   };
 
   const processText = async (text: string) => {
+    stopKazakh();
+    setError("");
     setState("processing");
     const found = findPhrase(text);
     if (found) return present(found);
@@ -90,7 +94,7 @@ export default function Home() {
         body: JSON.stringify({ text }),
       });
       const d = await r.json();
-      if (!r.ok) throw new Error(d.error);
+      if (!r.ok) throw new Error(d.error || "Бір нәрсе дұрыс болмады.");
       present(d);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Бір нәрсе дұрыс болмады.");
@@ -105,7 +109,7 @@ export default function Home() {
     setTranscript("");
 
     if (!recognition.current?.supported()) {
-      setError("Бұл браузерде дауыс тану қолдау таппайды.");
+      setError("Бұл браузерде дауыс тану қолдау таппайды. Мәтін енгізу өрісін қолдана аласыз.");
       return setState("error");
     }
 
@@ -136,7 +140,7 @@ export default function Home() {
         }
       );
     } catch {
-      setError("Микрофонға рұқсат беріңіз.");
+      setError("Микрофонға рұқсат беріңіз немесе төмендегі өріске жазыңыз.");
       setState("error");
     }
   };
@@ -148,7 +152,7 @@ export default function Home() {
       if (transcript) {
         processText(transcript);
       } else {
-        setError("Дауыс танылмады. Қайтадан көріңіз.");
+        setError("Дауыс танылмады. Қайтадан көріңіз немесе сөзді жазыңыз.");
         setState("error");
       }
     } else {
@@ -160,12 +164,12 @@ export default function Home() {
     state === "listening"
       ? "Тыңдап тұрмын..."
       : state === "processing"
-      ? "Мағынасын іздеп тұрмын..."
+      ? "Көне сөздің мағынасын талдап жатырмын..."
       : state === "speaking"
       ? "Табиғи қазақша түсіндіріп берейін..."
       : state === "error"
       ? "Қайтадан көріңіз"
-      : "Қазақтың сөзін айтып көріңіз";
+      : "Кез келген көне қазақ сөзін айтыңыз немесе жазыңыз";
 
   const stopSpeech = () => {
     stopKazakh();
@@ -178,6 +182,7 @@ export default function Home() {
     setLevel(0);
     setResult(null);
     setTranscript("");
+    setInputText("");
     setError("");
     setState("idle");
   };
@@ -204,6 +209,13 @@ export default function Home() {
     }
   };
 
+  const handleFormSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (inputText.trim()) {
+      processText(inputText.trim());
+    }
+  };
+
   return (
     <main>
       <header>
@@ -216,7 +228,7 @@ export default function Home() {
             disabled={state === "listening"}
           />
         </div>
-        <small className="header-subtitle">СӨЗДІҢ ТІРІ МАҒЫНАСЫ</small>
+        <small className="header-subtitle">КӨНЕ СӨЗДІҢ ТІРІ МАҒЫНАСЫ</small>
       </header>
 
       <div className="ambient a" />
@@ -243,17 +255,37 @@ export default function Home() {
           )}
         </AnimatePresence>
 
-        <VoiceButton listening={state === "listening"} onClick={toggle} />
+        <div className="action-row">
+          <VoiceButton listening={state === "listening"} onClick={toggle} />
+          {state === "speaking" && (
+            <button className="stop-speech" onClick={stopSpeech}>
+              ■ Тоқтату
+            </button>
+          )}
+        </div>
 
-        {state === "speaking" && (
-          <button className="stop-speech" onClick={stopSpeech}>
-            ■ Дауысты тоқтату
+        {/* Text Input for Typing ANY Ancient Word */}
+        <form className="text-input-form" onSubmit={handleFormSubmit}>
+          <input
+            type="text"
+            className="text-input"
+            value={inputText}
+            onChange={(e) => setInputText(e.target.value)}
+            placeholder="Кез келген көне сөзді жазыңыз (мысалы: селебе, ақберен, қорамсақ)..."
+            disabled={state === "listening" || state === "processing"}
+          />
+          <button
+            type="submit"
+            className="text-submit-btn"
+            disabled={!inputText.trim() || state === "processing"}
+          >
+            {state === "processing" ? "Іздеуде..." : "Түсіндір"}
           </button>
-        )}
+        </form>
 
         <p className="hint">
           {state === "idle"
-            ? "Микрофонды басып сөйлеңіз немесе төмендегі тіркестердің бірін таңдаңыз:"
+            ? "Дауыспен айтыңыз немесе мына көне сөздердің бірін таңдаңыз:"
             : transcript || "Даусыңызды тыңдап тұрмын..."}
         </p>
 
@@ -289,8 +321,7 @@ export default function Home() {
       <History items={history} onChoose={present} />
 
       <footer>
-        Қазақ тілінің көркем сөздері — бір ауызда бір әлем. Жоғары сапалы табиғи
-        нейро-дауыс (HD Neural TTS).
+        Қазақтың көне сөздері мен тарихи ұғымдары. Жасанды интеллект және HD табиғи дауыспен түсіндіру.
       </footer>
     </main>
   );
