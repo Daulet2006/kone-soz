@@ -84,9 +84,19 @@ export default function Home() {
     addToHistory(p);
     setState("speaking");
 
-    // Natural text-to-speech script for the 3D character
-    const memeText = p.meme ? `Күлкілі мем: ${p.meme.replace(/^😂\s*Мем:\s*/i, "")}.` : "";
-    const speechScript = `${p.phrase}. ${p.meaning}. ${p.explanation}. ${memeText}`;
+    // Natural text-to-speech script for the 3D character in pure Kazakh
+    const cleanSpeech = (text: string) =>
+      text
+        .replace(/[\u{1F600}-\u{1F64F}\u{1F300}-\u{1F5FF}\u{1F680}-\u{1F6FF}\u{1F1E0}-\u{1F1FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}]/gu, "")
+        .replace(/[*_~`#|]/g, "")
+        .replace(/\([^)]*\)/g, "")
+        .replace(/\s+/g, " ")
+        .trim();
+
+    const cleanMeaning = cleanSpeech(p.meaning || "");
+    const cleanExp = cleanSpeech(p.explanation || "");
+    const cleanMeme = p.meme ? cleanSpeech(p.meme.replace(/^😂\s*Мем:\s*/i, "")) : "";
+    const speechScript = `${p.phrase}. ${cleanMeaning}. ${cleanExp}. ${cleanMeme ? `Күлкілі өмірлік мем: ${cleanMeme}.` : ""}`.trim();
 
     speakKazakh(speechScript, {
       voice: currentVoice,
