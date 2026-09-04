@@ -1,0 +1,4 @@
+"use client";
+import { motion } from "framer-motion";
+import type { Phrase } from "@/types/phrase";
+export function PhraseResult({ phrase, onReplay, onNew }: { phrase: Phrase; onReplay: () => void; onNew: () => void }) { return <motion.article className="result" initial={{ opacity: 0, y: 18 }} animate={{ opacity: 1, y: 0 }}><p className="eyebrow">ТАБУ</p><h2>«{phrase.phrase}»</h2><section><p className="label">Мағынасы</p><h3>{phrase.meaning}</h3></section><section><p className="label">Қарапайым тілмен</p><p>{phrase.explanation}</p></section><section><p className="label">Мысалы</p><p className="example">«{phrase.example}»</p></section><div className="result-actions"><button className="replay" onClick={onReplay}>◖ Қайта тыңдау</button><button className="new-query" onClick={onNew}>＋ Тағы бір сөз</button></div></motion.article>; }

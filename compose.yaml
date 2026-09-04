@@ -1,0 +1,48 @@
+services:
+  web:
+    build: .
+    env_file: .env
+    environment:
+      TTS_SERVICE_URL: http://tts:8000
+    depends_on:
+      tts:
+        condition: service_healthy
+    restart: unless-stopped
+  tts:
+    build: ./tts-service
+    environment:
+      PIPER_VOICE: kk_KZ-issai-high
+    volumes:
+      - piper-voices:/voices
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+    restart: unless-stopped
+  caddy:
+    image: caddy:2.10-alpine
+    env_file: .env
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      - web
+    restart: unless-stopped
+  duckdns:
+    image: lscr.io/linuxserver/duckdns:latest
+    env_file: .env
+    environment:
+      SUBDOMAINS: ${DUCKDNS_SUBDOMAIN}
+      TOKEN: ${DUCKDNS_TOKEN}
+      UPDATE_IP: ipv4
+      LOG_FILE: "false"
+    restart: unless-stopped
+volumes:
+  piper-voices:
+  caddy-data:
+  caddy-config:
