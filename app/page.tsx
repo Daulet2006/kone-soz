@@ -32,7 +32,7 @@ export default function Home() {
   const [samplePhrases, setSamplePhrases] = useState<Phrase[]>([]);
 
   const recognition = useRef<SpeechRecognitionService | null>(null);
-  const stream = useRef<MediaStream | null>(null);
+  const pulseTimer = useRef<any>(null);
 
   // Initialize client-side state
   useEffect(() => {
@@ -47,7 +47,15 @@ export default function Home() {
       }
     } catch {}
 
-    // Automatically display a rich curated blend of both slang and ancient words
+    // Clean up on unmount
+    return () => {
+      recognition.current?.stop();
+      if (pulseTimer.current) clearInterval(pulseTimer.current);
+    };
+  }, []);
+
+  // Automatically display a rich curated blend of both slang and ancient words
+  useEffect(() => {
     const topKeywords = [
       "имба",
       "қой аузынан шөп алмас",
@@ -115,6 +123,11 @@ export default function Home() {
 
   const processText = async (text: string) => {
     stopKazakh();
+    if (pulseTimer.current) {
+      clearInterval(pulseTimer.current);
+      pulseTimer.current = null;
+    }
+    recognition.current?.stop();
     setError("");
     const cleanText = text.trim();
     if (!cleanText) return;
@@ -146,61 +159,70 @@ export default function Home() {
     }
   };
 
-
-  const startListening = async () => {
+  const startListening = () => {
     stopKazakh();
     setError("");
     setResult(null);
     setTranscript("");
 
     if (!recognition.current?.supported()) {
-      setError("Бұл браузерде дауыс тану қолдау таппайды. Мәтін өрісіне жазыңыз.");
+      setError("Бұл браузерде дауыс тану қолдау таппайды. Google Chrome немесе Safari арқылы кіріңіз, немесе төмендегі өріске жазыңыз.");
       return setState("error");
     }
 
-    try {
-      stream.current = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
-      const analyser = audioCtx.createAnalyser();
-      const source = audioCtx.createMediaStreamSource(stream.current);
-      const data = new Uint8Array(analyser.frequencyBinCount);
-      source.connect(analyser);
+    setState("listening");
 
-      setState("listening");
+    // Dynamic wave animation for avatar & mic ring
+    let waveStep = 0;
+    if (pulseTimer.current) clearInterval(pulseTimer.current);
+    pulseTimer.current = setInterval(() => {
+      waveStep += 0.25;
+      const levelVal = 0.25 + (Math.sin(waveStep) + 1) * 0.25;
+      setLevel(levelVal);
+    }, 100);
 
-      const tick = () => {
-        if (state !== "listening" && stream.current?.active === false) return;
-        analyser.getByteFrequencyData(data);
-        const avg = data.reduce((a, b) => a + b, 0) / data.length / 255;
-        setLevel(avg);
-        requestAnimationFrame(tick);
-      };
-      tick();
-
-      recognition.current.start(
-        ({ transcript: text }) => {
-          setTranscript(text);
-        },
-        (msg) => {
-          stream.current?.getTracks().forEach((t) => t.stop());
-          setError(msg);
-          setState("error");
+    recognition.current.start(
+      (text: string) => {
+        setTranscript(text);
+        setInputText(text);
+      },
+      (errorMsg: string) => {
+        if (pulseTimer.current) {
+          clearInterval(pulseTimer.current);
+          pulseTimer.current = null;
         }
-      );
-    } catch {
-      setError("Микрофонға рұқсат беріңіз немесе төмендегі өріске жазыңыз.");
-      setState("error");
-    }
+        setLevel(0);
+        setError(errorMsg);
+        setState("error");
+      },
+      (finalText: string) => {
+        if (pulseTimer.current) {
+          clearInterval(pulseTimer.current);
+          pulseTimer.current = null;
+        }
+        setLevel(0);
+        const cleanFinal = finalText.replace(/[.,!?;:]+$/g, "").trim();
+        setTranscript(cleanFinal);
+        setInputText(cleanFinal);
+        processText(cleanFinal);
+      }
+    );
   };
 
   const toggleListening = () => {
     if (state === "listening") {
+      if (pulseTimer.current) {
+        clearInterval(pulseTimer.current);
+        pulseTimer.current = null;
+      }
+      setLevel(0);
+      const current = (recognition.current?.getTranscript() || transcript || inputText).trim();
       recognition.current?.stop();
-      stream.current?.getTracks().forEach((t) => t.stop());
-      if (transcript.trim()) {
-        processText(transcript);
+      if (current) {
+        const cleanFinal = current.replace(/[.,!?;:]+$/g, "").trim();
+        processText(cleanFinal);
       } else {
-        setError("Дауыс танылмады. Қайтадан көріңіз немесе жазыңыз.");
+        setError("Дауыс анықталмады. Сөзді өріске жазып көріңіз.");
         setState("idle");
       }
     } else {
@@ -210,12 +232,22 @@ export default function Home() {
 
   const stopSpeech = () => {
     stopKazakh();
+    if (pulseTimer.current) {
+      clearInterval(pulseTimer.current);
+      pulseTimer.current = null;
+    }
+    recognition.current?.stop();
     setLevel(0);
     setState("complete");
   };
 
   const newQuery = () => {
     stopKazakh();
+    if (pulseTimer.current) {
+      clearInterval(pulseTimer.current);
+      pulseTimer.current = null;
+    }
+    recognition.current?.stop();
     setLevel(0);
     setResult(null);
     setTranscript("");
@@ -250,7 +282,9 @@ export default function Home() {
 
   const statusLabel =
     state === "listening"
-      ? "Сізді мұқият тыңдап тұрмын..."
+      ? transcript
+        ? `🎤 «${transcript}»...`
+        : "Сізді мұқият тыңдап тұрмын, сөйлеңіз..."
       : state === "processing"
       ? "Сөздің мағынасы мен мемін ойластырудамын..."
       : state === "speaking"
@@ -353,7 +387,8 @@ export default function Home() {
               value={inputText}
               onChange={(e) => setInputText(e.target.value)}
               placeholder="Кез келген сөзді немесе сленгті жазыңыз (мысалы: имба, краш, қой аузынан шөп алмас)..."
-              disabled={state === "listening" || state === "processing"}
+              readOnly={state === "listening"}
+              disabled={state === "processing"}
             />
             {inputText && (
               <button
