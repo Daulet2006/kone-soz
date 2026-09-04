@@ -1,25 +1,297 @@
 "use client";
+
 import { useEffect, useRef, useState } from "react";
 import { AnimatePresence } from "framer-motion";
 import type { Phrase, VoiceState } from "@/types/phrase";
 import { findPhrase } from "@/lib/phrases/search";
 import { SpeechRecognitionService } from "@/lib/speech/recognition";
-import { speakKazakh, stopKazakh } from "@/lib/speech/synthesis";
+import {
+  speakKazakh,
+  stopKazakh,
+  KazakhVoiceId,
+  getSavedVoice,
+} from "@/lib/speech/synthesis";
 import { SpeakingAvatar } from "@/components/voice/SpeakingAvatar";
 import { VoiceButton } from "@/components/voice/VoiceButton";
+import { VoiceSelector } from "@/components/voice/VoiceSelector";
 import { PhraseResult } from "@/components/result/PhraseResult";
 import { History } from "@/components/history/History";
 
+const SAMPLE_PHRASES = [
+  "көзді ашып жұмғанша",
+  "қой аузынан шөп алмас",
+  "қара қылды қақ жару",
+  "екі көзі төрт болды",
+  "жерден жеті қоян тапқандай",
+  "қой үстіне бозторғай жұмыртқалау",
+];
+
 export default function Home() {
- const [state,setState]=useState<VoiceState>("idle"),[transcript,setTranscript]=useState(""),[result,setResult]=useState<Phrase|null>(null),[error,setError]=useState(""),[history,setHistory]=useState<Phrase[]>([]),[level,setLevel]=useState(0);
- const recognition=useRef<SpeechRecognitionService|null>(null),stream=useRef<MediaStream|null>(null);
- useEffect(()=>{recognition.current=new SpeechRecognitionService();try{setHistory(JSON.parse(localStorage.getItem("taza-history")||"[]"))}catch{} return()=>stream.current?.getTracks().forEach(t=>t.stop())},[]);
- const save=(p:Phrase)=>setHistory(old=>{const n=[p,...old.filter(x=>x.id!==p.id)].slice(0,4);localStorage.setItem("taza-history",JSON.stringify(n));return n});
- const present=(p:Phrase)=>{setResult(p);save(p);setState("speaking");speakKazakh(`${p.phrase}. ${p.meaning}. ${p.explanation}`,()=>setState("complete"))};
- const processText=async(text:string)=>{setState("processing");const found=findPhrase(text);if(found)return present(found);try{const r=await fetch("/api/explain",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({text})}),d=await r.json();if(!r.ok)throw new Error(d.error);present(d)}catch(e){setError(e instanceof Error?e.message:"Бір нәрсе дұрыс болмады.");setState("error")}};
- const start=async()=>{setError("");setResult(null);setTranscript("");if(!recognition.current?.supported()){setError("Бұл браузерде дауыс тану қолдау таппайды.");return setState("error")}try{stream.current=await navigator.mediaDevices.getUserMedia({audio:true});const audio=new AudioContext(),analyser=audio.createAnalyser(),source=audio.createMediaStreamSource(stream.current),data=new Uint8Array(analyser.frequencyBinCount);source.connect(analyser);setState("listening");const tick=()=>{analyser.getByteFrequencyData(data);setLevel(data.reduce((a,b)=>a+b,0)/data.length/255);requestAnimationFrame(tick)};tick();recognition.current.start(({transcript})=>setTranscript(transcript),msg=>{stream.current?.getTracks().forEach(t=>t.stop());setError(msg);setState("error")})}catch{setError("Микрофонға рұқсат беріңіз.");setState("error")}};
- const toggle=()=>{if(state==="listening"){recognition.current?.stop();stream.current?.getTracks().forEach(t=>t.stop());transcript?processText(transcript):(setError("Дауыс танылмады. Қайтадан көріңіз."),setState("error"))}else start()};
- const label=state==="listening"?"Тыңдап тұрмын...":state==="processing"?"Мағынасын іздеп тұрмын...":state==="speaking"?"Түсіндіріп берейін...":state==="error"?"Қайтадан көріңіз":"Қазақтың сөзін айтып көріңіз";
- const stopSpeech=()=>{stopKazakh();setState("complete")}; const newQuery=()=>{stopKazakh();setResult(null);setTranscript("");setError("");setState("idle")};
- return <main><header><span className="mark">◒</span><span>ТАЗА ҚАЗАҚША</span><small>СӨЗДІҢ ТІРІ МАҒЫНАСЫ</small></header><div className="ambient a"/><div className="ambient b"/><section className="stage"><p className="status">{label}</p><SpeakingAvatar state={state} level={level}/><AnimatePresence>{state==="listening"&&<div className="waves">{Array.from({length:23}).map((_,i)=><i key={i} style={{height:`${18+(i*13%48)+level*54}px`,animationDelay:`${i*.035}s`}}/>)}</div>}</AnimatePresence><VoiceButton listening={state==="listening"} onClick={toggle}/>{state==="speaking"&&<button className="stop-speech" onClick={stopSpeech}>■ Дауысты тоқтату</button>}<p className="hint">{state==="idle"?"Микрофонды басып, фразаны айтыңыз":transcript||"Даусыңызды тыңдап тұрмын"}</p>{error&&<p className="error">{error}</p>}</section><AnimatePresence>{result&&<PhraseResult phrase={result} onReplay={()=>{setState("speaking");speakKazakh(`${result.meaning}. ${result.explanation}`,()=>setState("complete"))}} onNew={newQuery}/>}</AnimatePresence><History items={history} onChoose={present}/><footer>Қазақ тілінің көркем сөздері — бір ауызда бір әлем.</footer></main>
+  const [state, setState] = useState<VoiceState>("idle");
+  const [transcript, setTranscript] = useState("");
+  const [result, setResult] = useState<Phrase | null>(null);
+  const [error, setError] = useState("");
+  const [history, setHistory] = useState<Phrase[]>([]);
+  const [level, setLevel] = useState(0);
+  const [currentVoice, setCurrentVoice] = useState<KazakhVoiceId>("kk-KZ-AigulNeural");
+
+  const recognition = useRef<SpeechRecognitionService | null>(null);
+  const stream = useRef<MediaStream | null>(null);
+
+  useEffect(() => {
+    recognition.current = new SpeechRecognitionService();
+    setCurrentVoice(getSavedVoice());
+
+    try {
+      setHistory(JSON.parse(localStorage.getItem("taza-history") || "[]"));
+    } catch {}
+
+    return () => {
+      stopKazakh();
+      stream.current?.getTracks().forEach((t) => t.stop());
+    };
+  }, []);
+
+  const save = (p: Phrase) =>
+    setHistory((old) => {
+      const n = [p, ...old.filter((x) => x.id !== p.id)].slice(0, 4);
+      localStorage.setItem("taza-history", JSON.stringify(n));
+      return n;
+    });
+
+  const present = (p: Phrase) => {
+    setResult(p);
+    save(p);
+    setState("speaking");
+    speakKazakh(`${p.phrase}. ${p.meaning}. ${p.explanation}`, {
+      voice: currentVoice,
+      onFrequencyData: (lvl) => setLevel(lvl),
+      onEnd: () => {
+        setState("complete");
+        setLevel(0);
+      },
+      onError: (msg) => {
+        setError(msg);
+        setState("complete");
+        setLevel(0);
+      },
+    });
+  };
+
+  const processText = async (text: string) => {
+    setState("processing");
+    const found = findPhrase(text);
+    if (found) return present(found);
+
+    try {
+      const r = await fetch("/api/explain", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text }),
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error);
+      present(d);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Бір нәрсе дұрыс болмады.");
+      setState("error");
+    }
+  };
+
+  const start = async () => {
+    stopKazakh();
+    setError("");
+    setResult(null);
+    setTranscript("");
+
+    if (!recognition.current?.supported()) {
+      setError("Бұл браузерде дауыс тану қолдау таппайды.");
+      return setState("error");
+    }
+
+    try {
+      stream.current = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const audio = new AudioContext();
+      const analyser = audio.createAnalyser();
+      const source = audio.createMediaStreamSource(stream.current);
+      const data = new Uint8Array(analyser.frequencyBinCount);
+      source.connect(analyser);
+
+      setState("listening");
+
+      const tick = () => {
+        if (state !== "listening" && stream.current?.active === false) return;
+        analyser.getByteFrequencyData(data);
+        setLevel(data.reduce((a, b) => a + b, 0) / data.length / 255);
+        requestAnimationFrame(tick);
+      };
+      tick();
+
+      recognition.current.start(
+        ({ transcript: text }) => setTranscript(text),
+        (msg) => {
+          stream.current?.getTracks().forEach((t) => t.stop());
+          setError(msg);
+          setState("error");
+        }
+      );
+    } catch {
+      setError("Микрофонға рұқсат беріңіз.");
+      setState("error");
+    }
+  };
+
+  const toggle = () => {
+    if (state === "listening") {
+      recognition.current?.stop();
+      stream.current?.getTracks().forEach((t) => t.stop());
+      if (transcript) {
+        processText(transcript);
+      } else {
+        setError("Дауыс танылмады. Қайтадан көріңіз.");
+        setState("error");
+      }
+    } else {
+      start();
+    }
+  };
+
+  const label =
+    state === "listening"
+      ? "Тыңдап тұрмын..."
+      : state === "processing"
+      ? "Мағынасын іздеп тұрмын..."
+      : state === "speaking"
+      ? "Табиғи қазақша түсіндіріп берейін..."
+      : state === "error"
+      ? "Қайтадан көріңіз"
+      : "Қазақтың сөзін айтып көріңіз";
+
+  const stopSpeech = () => {
+    stopKazakh();
+    setLevel(0);
+    setState("complete");
+  };
+
+  const newQuery = () => {
+    stopKazakh();
+    setLevel(0);
+    setResult(null);
+    setTranscript("");
+    setError("");
+    setState("idle");
+  };
+
+  const handleReplay = () => {
+    if (!result) return;
+    if (state === "speaking") {
+      stopSpeech();
+    } else {
+      setState("speaking");
+      speakKazakh(`${result.phrase}. ${result.meaning}. ${result.explanation}`, {
+        voice: currentVoice,
+        onFrequencyData: (lvl) => setLevel(lvl),
+        onEnd: () => {
+          setState("complete");
+          setLevel(0);
+        },
+        onError: (msg) => {
+          setError(msg);
+          setState("complete");
+          setLevel(0);
+        },
+      });
+    }
+  };
+
+  return (
+    <main>
+      <header>
+        <span className="mark">◒</span>
+        <span className="brand-title">ТАЗА ҚАЗАҚША</span>
+        <div className="header-controls">
+          <VoiceSelector
+            currentVoice={currentVoice}
+            onVoiceChange={(v) => setCurrentVoice(v)}
+            disabled={state === "listening"}
+          />
+        </div>
+        <small className="header-subtitle">СӨЗДІҢ ТІРІ МАҒЫНАСЫ</small>
+      </header>
+
+      <div className="ambient a" />
+      <div className="ambient b" />
+
+      <section className="stage">
+        <p className="status">{label}</p>
+
+        <SpeakingAvatar state={state} level={level} />
+
+        <AnimatePresence>
+          {state === "listening" && (
+            <div className="waves">
+              {Array.from({ length: 23 }).map((_, i) => (
+                <i
+                  key={i}
+                  style={{
+                    height: `${18 + ((i * 13) % 48) + level * 54}px`,
+                    animationDelay: `${i * 0.035}s`,
+                  }}
+                />
+              ))}
+            </div>
+          )}
+        </AnimatePresence>
+
+        <VoiceButton listening={state === "listening"} onClick={toggle} />
+
+        {state === "speaking" && (
+          <button className="stop-speech" onClick={stopSpeech}>
+            ■ Дауысты тоқтату
+          </button>
+        )}
+
+        <p className="hint">
+          {state === "idle"
+            ? "Микрофонды басып сөйлеңіз немесе төмендегі тіркестердің бірін таңдаңыз:"
+            : transcript || "Даусыңызды тыңдап тұрмын..."}
+        </p>
+
+        {state === "idle" && !result && (
+          <div className="sample-chips">
+            {SAMPLE_PHRASES.map((phrase) => (
+              <button
+                key={phrase}
+                type="button"
+                className="chip-button"
+                onClick={() => processText(phrase)}
+              >
+                «{phrase}»
+              </button>
+            ))}
+          </div>
+        )}
+
+        {error && <p className="error">{error}</p>}
+      </section>
+
+      <AnimatePresence>
+        {result && (
+          <PhraseResult
+            phrase={result}
+            isSpeaking={state === "speaking"}
+            onReplay={handleReplay}
+            onNew={newQuery}
+          />
+        )}
+      </AnimatePresence>
+
+      <History items={history} onChoose={present} />
+
+      <footer>
+        Қазақ тілінің көркем сөздері — бір ауызда бір әлем. Жоғары сапалы табиғи
+        нейро-дауыс (HD Neural TTS).
+      </footer>
+    </main>
+  );
 }
