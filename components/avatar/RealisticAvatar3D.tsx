@@ -16,19 +16,18 @@ export interface AvatarCharacterConfig {
   objectPosition: string;
   glowColor: string;
   accentGradient: string;
-  // Legacy / fallback image src
   imageSrc: string;
 }
 
 export const DEFAULT_AVATARS: Record<KazakhVoiceId, AvatarCharacterConfig> = {
   "kk-KZ-AigulNeural": {
     name: "Арай.AI",
-    role: "Қыз кейіпкері • Live AI Видео",
+    role: "Қыз кейіпкері",
     gender: "female",
     videoSrc: "/live-video/ai-woman.mp4",
     idlePosterSrc: "/live-video/woman-idle.jpg",
-    idleTime: 0.0,         // Frame 0.0s: mouth closed, looking forward, perfectly still
-    speechStart: 0.7,      // 0.7s to 4.1s: animated continuous speaking & nodding
+    idleTime: 0.0,         // Frame 0.0s: mouth closed, calm, still
+    speechStart: 0.7,      // 0.7s to 4.1s: animated continuous speaking
     speechEnd: 4.1,
     objectPosition: "50% 16%",
     glowColor: "rgba(236, 72, 153, 0.4)",
@@ -37,12 +36,12 @@ export const DEFAULT_AVATARS: Record<KazakhVoiceId, AvatarCharacterConfig> = {
   },
   "kk-KZ-DauletNeural": {
     name: "Айбар.AI",
-    role: "Ұл кейіпкері • Live AI Видео",
+    role: "Ұл кейіпкері",
     gender: "male",
     videoSrc: "/live-video/ai-man.mp4",
     idlePosterSrc: "/live-video/man-idle.jpg",
-    idleTime: 4.75,        // Frame 4.75s: mouth completely closed, calm posture, still
-    speechStart: 0.7,      // 0.7s to 3.2s: continuous expressive speech with gestures
+    idleTime: 4.75,        // Frame 4.75s: mouth completely closed, calm posture
+    speechStart: 0.7,      // 0.7s to 3.2s: continuous expressive speech
     speechEnd: 3.2,
     objectPosition: "50% 22%",
     glowColor: "rgba(6, 182, 212, 0.4)",
@@ -71,7 +70,6 @@ export function RealisticAvatar3D({
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const [mousePos, setMousePos] = useState({ x: 0, y: 0 });
-  const [isVideoReady, setIsVideoReady] = useState(false);
 
   // 3D Parallax Mouse Tracking
   useEffect(() => {
@@ -91,17 +89,16 @@ export function RealisticAvatar3D({
     };
   }, []);
 
-  // Sync video to idle state when metadata loads or voice changes
+  // Sync video to idle state when metadata loads
   const handleLoadedMetadata = () => {
     const vid = videoRef.current;
     if (!vid) return;
-    setIsVideoReady(true);
     if (state !== "speaking") {
       try {
         vid.currentTime = config.idleTime;
         vid.pause();
       } catch {
-        // Safe seek catch
+        // Safe catch
       }
     }
   };
@@ -203,20 +200,20 @@ export function RealisticAvatar3D({
               />
             )}
 
-            {/* Video Scanline simulation for authentic Studio Video Feel */}
+            {/* Background preloader for alternate character for zero-delay instant switching */}
+            <video
+              src={isFemale ? "/live-video/ai-man.mp4" : "/live-video/ai-woman.mp4"}
+              muted
+              preload="auto"
+              style={{ display: "none" }}
+            />
+
+            {/* Video Scanline simulation for authentic Studio Feel */}
             <div className="avatar-video-scanlines" />
 
             {/* Cinematic Glass Gloss & Rim Lighting */}
             <div className="avatar-glass-gloss" />
             <div className="avatar-rim-lighting" />
-
-            {/* Live Video Recording Badge */}
-            <div className="avatar-video-badge">
-              <span className={`live-rec-dot ${state === "speaking" ? "is-talking" : ""}`} />
-              <span className="live-rec-text">
-                {state === "speaking" ? "AI СӨЙЛЕУДЕ" : "AI VIDEO"}
-              </span>
-            </div>
           </div>
 
           {/* Kazakh Cyber Crest Emblem */}
